@@ -7,21 +7,62 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+def _flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _int(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    return int(raw) if raw else default
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     token: str
     owners: frozenset[int]
-    state_file: Path
+    data_dir: Path
+    secret_key: str | None
+    legacy_state_file: Path
     reactions_ttl: int
     max_concurrency: int
+    max_targets_per_user: int
+    max_bots_per_user: int
+    service_public: bool
+    support: str
+    log_level: str
+
+    @property
+    def db_path(self) -> Path:
+        return self.data_dir / "autoreaction.db"
 
     @classmethod
     def from_env(cls) -> Config:
         load_dotenv()
+
+        token = os.getenv("MAIN_BOT_TOKEN", "").strip()
+        if not token:
+            raise RuntimeError("MAIN_BOT_TOKEN is not set")
+
+        owners = frozenset(
+            int(x) for x in os.getenv("OWNER_IDS", "").replace(" ", "").split(",") if x
+        )
+        if not owners:
+            raise RuntimeError("OWNER_IDS is not set (comma separated numeric Telegram IDs)")
+
         return cls(
-            token=os.environ["MAIN_BOT_TOKEN"],
-            owners=frozenset(int(x) for x in os.environ["OWNER_IDS"].split(",") if x.strip()),
-            state_file=Path(os.getenv("STATE_FILE", "state.json")),
-            reactions_ttl=int(os.getenv("REACTIONS_TTL", "300")),
-            max_concurrency=int(os.getenv("MAX_CONCURRENCY", "20")),
+            token=token,
+            owners=owners,
+            data_dir=Path(os.getenv("DATA_DIR", "data")),
+            secret_key=os.getenv("SECRET_KEY", "").strip() or None,
+            legacy_state_file=Path(os.getenv("STATE_FILE", "state.json")),
+            reactions_ttl=_int("REACTIONS_TTL", 300),
+            max_concurrency=_int("MAX_CONCURRENCY", 20),
+            max_targets_per_user=_int("MAX_TARGETS_PER_USER", 5),
+            max_bots_per_user=_int("MAX_BOTS_PER_USER", 10),
+            service_public=_flag("SERVICE_PUBLIC", False),
+            support=os.getenv("SUPPORT_CONTACT", "").strip(),
+            log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         )
