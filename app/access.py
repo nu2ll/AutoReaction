@@ -5,8 +5,7 @@ from app.config import Config
 from app.db import Database
 from app.models import Target, User
 
-# Telegram allows at most 50 admins per chat; keep room for the main bot, humans and own bots.
-MAX_SERVICE_PER_CHAT = 40
+MAX_SERVICE_PER_CHAT = 50
 
 
 class Access:

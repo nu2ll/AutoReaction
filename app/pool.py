@@ -1,9 +1,11 @@
 """In-memory registry of every live Bot object (service bots and users' own bots)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from telegram import Bot
+from telegram.error import TimedOut
 from telegram.request import HTTPXRequest
 
 log = logging.getLogger(__name__)
@@ -16,19 +18,28 @@ class BotPool:
         self._owner: dict[int, int | None] = {}  # bot_id -> user_id, None for service bots
 
     # ---------------------------------------------------------------- lifecycle
-    async def connect(self, token: str) -> Bot:
-        """Create and initialise a Bot (validates the token). Does not register it."""
-        request = HTTPXRequest(connection_pool_size=self._connections)
-        updates_request = HTTPXRequest(connection_pool_size=1)
-        bot = Bot(token, request=request, get_updates_request=updates_request)
-        try:
-            await bot.initialize()
-        except Exception:
-            # Bot.shutdown() is a no-op when initialisation failed, so close the clients ourselves.
-            await request.shutdown()
-            await updates_request.shutdown()
-            raise
-        return bot
+    async def connect(self, token: str, attempts: int = 4) -> Bot:
+        """Create and initialise a Bot (validates the token). Does not register it.
+
+        A timeout is retried a couple of times: with many tokens at once Telegram's API is often slow."""
+        for attempt in range(1, attempts + 1):
+            request = HTTPXRequest(
+                connection_pool_size=self._connections, connect_timeout=10, read_timeout=15, pool_timeout=10
+            )
+            updates_request = HTTPXRequest(connection_pool_size=1)
+            bot = Bot(token, request=request, get_updates_request=updates_request)
+            try:
+                await bot.initialize()
+                return bot
+            except Exception as exc:
+                # Bot.shutdown() is a no-op when initialisation failed, so close the clients ourselves.
+                await request.shutdown()
+                await updates_request.shutdown()
+                if not isinstance(exc, TimedOut) or attempt == attempts:
+                    raise
+                log.debug("connect timed out (%d/%d), retrying", attempt, attempts)
+                await asyncio.sleep(2)
+        raise RuntimeError("unreachable")
 
     def attach(self, bot: Bot, owner_id: int | None) -> None:
         self._bots[bot.id] = bot

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import html
-import json
 import logging
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
@@ -11,13 +10,13 @@ from typing import Any
 from telegram import Bot, InlineKeyboardMarkup
 from telegram.error import InvalidToken, TelegramError
 
-from app.access import MAX_SERVICE_PER_CHAT, Access
+from app.access import Access
 from app.config import Config
 from app.crypto import Vault
 from app.db import Database
-from app.models import Source
+from app.helper import Helper
 from app.pool import BotPool
-from app.reactor import ReactionCache, Reactor
+from app.reactor import Reactor
 
 log = logging.getLogger(__name__)
 
@@ -33,9 +32,10 @@ class Core:
     vault: Vault
     pool: BotPool
     access: Access
-    cache: ReactionCache
     reactor: Reactor
     main: Bot | None = None
+    helper: Helper | None = None
+    helper_login: Any = None  # phone login in progress (admin panel)
     _tasks: set[asyncio.Task[Any]] = field(default_factory=set)
 
     @classmethod
@@ -44,20 +44,83 @@ class Core:
         vault = Vault.load(config.secret_key, config.data_dir / "secret.key")
         pool = BotPool()
         access = Access(config, db)
-        cache = ReactionCache(config.reactions_ttl)
-        reactor = Reactor(db, pool, access, cache, config.max_concurrency)
-        core = cls(config, db, vault, pool, access, cache, reactor)
+        reactor = Reactor(db, pool, access, config.max_concurrency)
+        core = cls(config, db, vault, pool, access, reactor)
         reactor.on_dead = core.handle_dead_bot
         return core
 
     # ---------------------------------------------------------------- lifecycle
     async def start(self, main: Bot) -> None:
         self.main = main
+        await self._start_helper()
         await self.access.load()
         await self._load_bots()
-        await self._import_legacy()
+
+    async def _start_helper(self) -> None:
+        """The panel-managed account (database) wins; .env values are only the default."""
+        cfg = self.config
+        if await self.db.kv_get("helper_managed"):
+            raw_session = await self.db.kv_get("helper_session")
+            if not raw_session:
+                return  # removed from the panel
+            try:
+                api_id = int(await self.db.kv_get("helper_api_id") or 0)
+                api_hash = self.vault.decrypt(await self.db.kv_get("helper_api_hash") or "")
+                session = self.vault.decrypt(raw_session)
+            except Exception:  # noqa: BLE001
+                log.error("cannot decrypt the helper account (wrong SECRET_KEY?)")
+                return
+        elif cfg.helper_enabled:
+            api_id, api_hash, session = cfg.helper_api_id, cfg.helper_api_hash, cfg.helper_session
+        else:
+            return
+        helper = Helper(api_id, api_hash, session, await self._helper_leave())
+        try:
+            await helper.start()
+        except Exception:  # noqa: BLE001 - the bot works without it
+            log.exception("helper account disabled")
+            return
+        self.helper = helper
+
+    async def _helper_leave(self) -> bool:
+        """Leave the chat after the work? The panel's choice wins over HELPER_LEAVE in .env."""
+        saved = await self.db.kv_get("helper_leave")
+        return self.config.helper_leave if saved is None else saved == "1"
+
+    async def set_helper_leave(self, leave: bool) -> None:
+        await self.db.kv_set("helper_leave", "1" if leave else "0")
+        if self.helper is not None:
+            self.helper.leave_after = leave
+
+    async def set_helper(self, api_id: int, api_hash: str, session: str) -> Helper:
+        """Connect a (new) helper account, keep it encrypted in the database. Raises on failure."""
+        helper = Helper(api_id, api_hash, session, await self._helper_leave())
+        await helper.start()
+        old, self.helper = self.helper, helper
+        if old is not None:
+            await old.close()
+        await self.db.kv_set("helper_api_id", str(api_id))
+        await self.db.kv_set("helper_api_hash", self.vault.encrypt(api_hash))
+        await self.db.kv_set("helper_session", self.vault.encrypt(session))
+        await self.db.kv_set("helper_managed", "1")
+        return helper
+
+    async def remove_helper(self) -> bool:
+        """Forget the helper account and terminate its session. False if there was none."""
+        helper, self.helper = self.helper, None
+        for key in ("helper_api_id", "helper_api_hash", "helper_session"):
+            await self.db.kv_delete(key)
+        await self.db.kv_set("helper_managed", "1")  # .env must not bring it back
+        if helper is None:
+            return False
+        await helper.logout()
+        return True
 
     async def close(self) -> None:
+        if self.helper_login is not None:
+            await self.helper_login.close()
+        if self.helper is not None:
+            await self.helper.close()
         await self.reactor.close()
         for task in tuple(self._tasks):
             task.cancel()
@@ -163,48 +226,3 @@ class Core:
         text = f"⚠️ توکن ربات @{bot.username} دیگه معتبر نیست و غیرفعال شد."
         for uid in (self.config.owners if rec is None or rec.owner_id is None else {rec.owner_id}):
             await self.notify(uid, text)
-
-    # ------------------------------------------------------------- legacy (v1)
-    async def _import_legacy(self) -> None:
-        path = self.config.legacy_state_file
-        if not path.exists() or await self.db.kv_get("legacy_imported"):
-            return
-
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            log.exception("cannot read legacy state file %s", path)
-            return
-
-        owner = min(self.config.owners)
-        await self.db.ensure_user(owner)
-
-        added: list[int] = []
-        for token in data.get("workers", []):
-            try:
-                bot = await self.register_bot(token, None)
-            except BotRegistrationError as exc:
-                log.warning("legacy worker skipped: %s", exc)
-                continue
-            added.append(bot.id)
-
-        for chat_id, title in data.get("chats", {}).items():
-            if await self.db.get_target_by_chat(int(chat_id)):
-                continue
-            target = await self.db.create_target(
-                int(chat_id),
-                title,
-                "",
-                owner,
-                source=Source.SERVICE,
-                service_count=min(len(added), MAX_SERVICE_PER_CHAT),
-                chance=int(data.get("chance", 100)),
-                enabled=bool(data.get("enabled", True)),
-            )
-            for bot_id in added[:MAX_SERVICE_PER_CHAT]:  # v1 workers were already admins there
-                await self.db.assign(target.id, bot_id)
-
-        await self.db.kv_set("legacy_imported", "1")
-        log.info(
-            "imported legacy state: %d bots, %d chats", len(added), len(data.get("chats", {}))
-        )

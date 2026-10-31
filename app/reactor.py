@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Hashable
@@ -26,32 +25,11 @@ SUPPORTED_TYPES = (ReactionTypeEmoji, ReactionTypeCustomEmoji)
 MAX_ATTEMPTS = 3
 
 
-class ReactionCache:
-    """Which reactions a chat allows (cached; the main bot fetches it)."""
-
-    def __init__(self, ttl: int) -> None:
-        self._ttl = ttl
-        self._data: dict[int, tuple[float, tuple[ReactionType, ...]]] = {}
-
-    async def get(self, bot: Bot, chat_id: int) -> tuple[ReactionType, ...]:
-        cached = self._data.get(chat_id)
-        if cached and time.monotonic() - cached[0] < self._ttl:
-            return cached[1]
-
-        chat = await bot.get_chat(chat_id)
-        if chat.available_reactions is None:
-            reactions = DEFAULT_REACTIONS
-        else:
-            reactions = tuple(r for r in chat.available_reactions if isinstance(r, SUPPORTED_TYPES))
-
-        self._data[chat_id] = (time.monotonic(), reactions)
-        return reactions
-
-    def drop(self, chat_id: int) -> None:
-        self._data.pop(chat_id, None)
-
-    def clear(self) -> None:
-        self._data.clear()
+async def chat_reactions(bot: Bot, chat_id: int) -> tuple[ReactionType, ...]:
+    chat = await bot.get_chat(chat_id)
+    if chat.available_reactions is None:
+        return DEFAULT_REACTIONS
+    return tuple(r for r in chat.available_reactions if isinstance(r, SUPPORTED_TYPES))
 
 
 class AlbumGuard:
@@ -76,13 +54,11 @@ class Reactor:
         db: Database,
         pool: BotPool,
         access: Access,
-        cache: ReactionCache,
         concurrency: int,
     ) -> None:
         self._db = db
         self._pool = pool
         self._access = access
-        self._cache = cache
         self._albums = AlbumGuard()
         self._semaphore = asyncio.Semaphore(concurrency)
         self._tasks: set[asyncio.Task[None]] = set()
@@ -139,7 +115,7 @@ class Reactor:
 
     async def reactions_for(self, main: Bot, target: Target) -> tuple[ReactionType, ...]:
         try:
-            reactions = await self._cache.get(main, target.chat_id)
+            reactions = await chat_reactions(main, target.chat_id)
         except TelegramError as exc:
             log.error("cannot load reactions for %s: %s", target.chat_id, exc)
             return ()

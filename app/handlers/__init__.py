@@ -66,6 +66,8 @@ def register(app: Application, core: Core) -> None:
 
     app.add_handler(ChatMemberHandler(events.on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, inputs.on_text))
+    # everything else sent to the bot privately (stickers, photos, unknown commands) is removed
+    app.add_handler(MessageHandler(private & (~filters.TEXT | filters.COMMAND), inputs.on_other))
     app.add_handler(
         MessageHandler(
             filters.UpdateType.CHANNEL_POST | (filters.ChatType.GROUPS & filters.UpdateType.MESSAGE),

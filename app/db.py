@@ -301,6 +301,9 @@ class Database:
             (key, value),
         )
 
+    async def kv_delete(self, key: str) -> None:
+        await self._x("DELETE FROM kv WHERE key=?", (key,))
+
     async def stats(self) -> dict[str, int]:
         rows = await self._q(
             """SELECT

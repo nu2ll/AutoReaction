@@ -21,9 +21,25 @@ async def on_post(update: Update, context: Context) -> None:
     message, chat = update.effective_message, update.effective_chat
     if not message or not chat:
         return
+    if chat.type != ChatType.CHANNEL and _is_command_for_me(message, context.bot.username):
+        # a command aimed at this bot inside a group: remove it silently (only if we are allowed to)
+        try:
+            await message.delete()
+        except Exception:  # noqa: BLE001 - no delete right, too old...: do nothing, say nothing
+            pass
+        return
     await core_of(context).reactor.on_message(
         context.bot, chat.id, message.message_id, message.media_group_id
     )
+
+
+def _is_command_for_me(message, username: str | None) -> bool:
+    """True for "/cmd@thisbot ..." only; plain "/cmd" may be meant for another bot, so it is left alone."""
+    text = (message.text or "").lstrip()
+    if not text.startswith("/") or not username:
+        return False
+    _, _, target = text.split(None, 1)[0][1:].partition("@")
+    return target.lower() == username.lower()
 
 
 async def on_my_chat_member(update: Update, context: Context) -> None:
@@ -39,9 +55,8 @@ async def on_my_chat_member(update: Update, context: Context) -> None:
         for target in await core.db.delete_targets_by_chat(chat.id):
             await core.notify(
                 target.owner_id,
-                f"⚠️ ربات از <b>{esc(chat.title or str(chat.id))}</b> حذف شد؛ این چت از لیستت پاک شد.",
+                f"⚠️ ربات از <b>{esc(chat.title or str(chat.id))}</b> حذف شد؛\nاین چت از لیستت پاک شد.",
             )
-        core.cache.drop(chat.id)
         return
 
     if chat.type not in chats.SUPPORTED_CHATS or actor.is_bot:
@@ -71,12 +86,12 @@ async def on_my_chat_member(update: Update, context: Context) -> None:
         else:
             await core.notify(
                 actor.id,
-                "ℹ️ برای اینکه ربات‌ها خودکار ادمین بشن، دسترسی «افزودن ادمین» (Add New Admins) "
-                "رو به ربات بده و بعد توی صفحه‌ی چت «🛡 ادمین‌کردن ربات‌ها» رو بزن.",
+                "ℹ️ برای اینکه ربات‌ها خودکار ادمین بشن،\nدسترسی «افزودن ادمین» (Add New Admins) "
+                "رو به ربات بده\nو بعد توی صفحه‌ی چت «🛡 ادمین‌کردن ربات‌ها» رو بزن.",
             )
 
     elif new.status == S.MEMBER and chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
         await core.notify(
             actor.id,
-            f"ℹ️ ربات توی <b>{esc(chat.title or str(chat.id))}</b> فقط عضوه. برای دیدن همه‌ی پیام‌ها و ثبت چت، ادمینش کن.",
+            f"ℹ️ ربات توی <b>{esc(chat.title or str(chat.id))}</b> فقط عضوه.\nبرای دیدن همه‌ی پیام‌ها و ثبت چت، ادمینش کن.",
         )

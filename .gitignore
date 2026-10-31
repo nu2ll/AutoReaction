@@ -1,5 +1,4 @@
 .env
-state.json
 data/
 *.db
 *.db-wal

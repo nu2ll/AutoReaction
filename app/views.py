@@ -19,13 +19,40 @@ SOURCE_LABEL = {
     Source.BOTH: "🤖+🏢 هر دو",
 }
 MODE_LABEL = {Mode.RANDOM: "🎲 رندوم", Mode.CUSTOM: "✍️ لیست من"}
-PAGE_SIZE = 20
+PAGE_SIZE = 10  # lists with more bots than this are split into pages
 
 View = tuple[str, Markup]
+
+# admin rights requested when the main bot is added: one set, shared by the channel and group links
+ADD_RIGHTS = "promote_members+manage_chat"
 
 
 def back(to: str = "m:home", label: str = "🔙 برگشت") -> list[Btn]:
     return [Btn(label, callback_data=to)]
+
+
+def with_note(view: View, note: str) -> View:
+    """Put a short result line on top of a screen, so a result edits the panel instead of a new message."""
+    text, markup = view
+    return f"{note}\n\n{text}", markup
+
+
+def cancel_markup(state: dict) -> Markup:
+    """The ✖️ انصراف button of whatever input prompt `state` describes."""
+    kind = state.get("kind", "")
+    if kind == "own_bot":
+        to = "m:cancel:b"
+    elif kind == "svc_bot":
+        to = "a:svc:0"
+    elif kind == "chat_ref":
+        to = "m:cancel:t"
+    elif kind == "emojis":
+        to = f"t:open:{state.get('target')}"
+    elif kind.startswith("helper_"):
+        to = "a:helper"
+    else:
+        to = "m:home"
+    return Markup([back(to, "✖️ انصراف")])
 
 
 def service_status(core: Core, user_id: int, user: User | None) -> str:
@@ -65,22 +92,30 @@ async def home_view(core: Core, user: User) -> View:
 HELP = """<b>📖 راهنما</b>
 
 <b>۱) ثبت چت</b>
-ربات رو توی کانال یا گروهت <b>ادمین</b> کن (دسترسی «افزودن ادمین» رو هم بده). چت خودکار ثبت می‌شه. یا از «چت‌های من» یوزرنیم/آیدی عددی رو بفرست.
+ربات رو توی کانال یا گروهت <b>ادمین</b> کن
+(دسترسی «افزودن ادمین» رو هم بده).
+چت خودکار ثبت می‌شه.
+یا از «چت‌های من» یوزرنیم/آیدی عددی رو بفرست.
 
 <b>۲) ربات‌های ری‌اکشن</b>
-🤖 <b>ربات خودت:</b> از @BotFather توکن بگیر و توی «ربات‌های من» بفرست.
+🤖 <b>ربات خودت:</b> از @BotFather توکن بگیر
+و توی «ربات‌های من» بفرست.
 🏢 <b>سرویس ما:</b> ربات‌های آماده‌ی ما (نیاز به فعال‌سازی).
 
 <b>۳) نوع ری‌اکشن</b>
 🎲 رندوم از بین ری‌اکشن‌های مجاز همون چت
-✍️ لیست خودت: ایموجی‌ها رو بفرست، ربات‌ها فقط از بینشون انتخاب می‌کنن
+✍️ لیست خودت: ایموجی‌ها رو بفرست،
+ربات‌ها فقط از بینشون انتخاب می‌کنن
 
 <b>۴) ادمین‌کردن ربات‌ها</b>
-دکمه‌ی «🛡 ادمین‌کردن ربات‌ها» توی صفحه‌ی چت، همه‌ی ربات‌ها رو خودکار ادمین می‌کنه.
-توی کانال‌ها مستقیم کار می‌کنه؛ توی گروه‌ها ربات باید قبلاً عضو باشه.
+دکمه‌ی «🛡 ادمین‌کردن ربات‌ها» توی صفحه‌ی چت،
+همه‌ی ربات‌ها رو خودکار ادمین می‌کنه.
+توی کانال‌ها مستقیم کار می‌کنه؛
+توی گروه‌ها ربات‌ها ادمین نمی‌شن و فقط عضو می‌شن:
 
 <b>۵) تنظیمات هر چت</b>
-احتمال ری‌اکشن، تعداد ربات‌های سرویس، خاموش/روشن، و بررسی دسترسی‌ها."""
+احتمال ری‌اکشن، تعداد ربات‌های سرویس،
+خاموش/روشن، و بررسی دسترسی‌ها."""
 
 
 def help_view() -> View:
@@ -95,7 +130,7 @@ async def targets_view(core: Core, user_id: int) -> View:
     else:
         text = (
             "<b>📢 چت‌های من</b>\n\nهنوز چتی ثبت نکردی.\n"
-            "ربات رو با دکمه‌های پایین به کانال/گروهت اضافه کن؛ خودکار ثبت می‌شه."
+            "ربات رو با دکمه‌های پایین به کانال/گروهت اضافه کن؛\nخودکار ثبت می‌شه."
         )
     rows = [
         [Btn(f"{'🟢' if t.enabled else '⏸'} {t.title[:32]}", callback_data=f"t:open:{t.id}")]
@@ -103,8 +138,8 @@ async def targets_view(core: Core, user_id: int) -> View:
     ]
     me = core.main.username
     rows.append([
-        Btn("➕ کانال", url=f"https://t.me/{me}?startchannel=true&admin=promote_members+manage_chat"),
-        Btn("➕ گروه", url=f"https://t.me/{me}?startgroup=true&admin=promote_members+manage_chat"),
+        Btn("➕ کانال", url=f"https://t.me/{me}?startchannel=true&admin={ADD_RIGHTS}"),
+        Btn("➕ گروه", url=f"https://t.me/{me}?startgroup=true&admin={ADD_RIGHTS}"),
     ])
     rows.append([Btn("🔎 افزودن با یوزرنیم / آیدی", callback_data="t:add")])
     rows.append(back())
@@ -115,7 +150,8 @@ def add_chat_prompt() -> View:
     text = (
         "یوزرنیم یا آیدی عددی کانال/گروه رو بفرست.\n"
         "مثال: <code>@mychannel</code> یا <code>-1001234567890</code>\n\n"
-        "ربات اصلی باید اونجا ادمین باشه و تو هم ادمین اون چت باشی."
+        "ربات اصلی باید اونجا ادمین باشه\n"
+        "و تو هم ادمین اون چت باشی."
     )
     return text, Markup([back("m:cancel:t", "✖️ انصراف")])
 
@@ -151,6 +187,10 @@ async def target_view(core: Core, target: Target) -> View:
             active += min(svc_n, want)
         else:
             lines.append("🏢 سرویس: ❌ دسترسی نداری")
+    from app import chats  # late: chats imports a lot
+
+    if (admins := await chats.admins_in_chat(core, target)) is not None:
+        lines.append(f"👮 ادمین‌ها: <b>{admins}</b> از <b>{chats.ADMIN_LIMIT}</b>")
     lines.append(f"📨 ری‌اکشن‌های ارسال‌شده: <b>{target.reactions_sent:,}</b>")
     if active == 0:
         lines += ["", "⚠️ هنوز رباتی فعال نیست؛ «🛡 ادمین‌کردن ربات‌ها» رو بزن."]
@@ -187,9 +227,12 @@ async def target_view(core: Core, target: Target) -> View:
 def emoji_prompt(target: Target) -> View:
     current = " ".join(target.emojis) or "—"
     text = (
-        f"ایموجی‌هایی که می‌خوای ربات‌ها استفاده کنن رو توی یک پیام بفرست.\n"
-        f"مثال: 🔥 ❤️ 👍 🎉\n\nلیست فعلی: {current}\n\n"
-        "فقط ایموجی‌هایی که تلگرام برای ری‌اکشن مجاز کرده قبول می‌شن (حداکثر ۲۰ تا)."
+        "ایموجی‌هایی که می‌خوای\n"
+        "ربات‌ها استفاده کنن رو توی یک پیام بفرست.\n"
+        "مثال: 🔥 ❤️ 👍 🎉\n\n"
+        f"لیست فعلی: {current}\n\n"
+        "فقط ایموجی‌هایی که تلگرام\n"
+        "برای ری‌اکشن مجاز کرده قبول می‌شن (حداکثر ۲۰ تا)."
     )
     return text, Markup([back(f"t:open:{target.id}", "✖️ انصراف")])
 
@@ -197,7 +240,7 @@ def emoji_prompt(target: Target) -> View:
 def confirm_delete_target(target: Target) -> View:
     text = (
         f"❓ چت <b>{esc(target.title)}</b> حذف بشه؟\n"
-        "ربات‌های سرویس از این چت برداشته می‌شن."
+        "همه‌ی ربات‌های ری‌اکشن\n(سرویس و خودت) از این چت خارج می‌شن."
     )
     return text, Markup([[
         Btn("✅ بله، حذف کن", callback_data=f"t:delok:{target.id}"),
@@ -206,15 +249,38 @@ def confirm_delete_target(target: Target) -> View:
 
 
 # -------------------------------------------------------------------- own bots
-async def bots_view(core: Core, user_id: int) -> View:
+def _pager(page: int, pages: int, prefix: str) -> list[Btn]:
+    """◀️ 2/3 ▶️ - empty when everything fits on one page."""
+    if pages <= 1:
+        return []
+    nav = []
+    if page > 0:
+        nav.append(Btn("◀️", callback_data=f"{prefix}:{page - 1}"))
+    nav.append(Btn(f"{page + 1}/{pages}", callback_data="noop"))
+    if page < pages - 1:
+        nav.append(Btn("▶️", callback_data=f"{prefix}:{page + 1}"))
+    return nav
+
+
+def _page_of(items: list, page: int) -> tuple[list, int, int]:
+    pages = max(1, -(-len(items) // PAGE_SIZE))
+    page = max(0, min(page, pages - 1))
+    return items[page * PAGE_SIZE:(page + 1) * PAGE_SIZE], page, pages
+
+
+async def bots_view(core: Core, user_id: int, page: int = 0) -> View:
     bots = await core.db.list_bots(user_id)
+    chunk, page, pages = _page_of(bots, page)
     limit = "" if core.access.is_owner(user_id) else f" / {core.config.max_bots_per_user}"
     lines = [f"<b>🤖 ربات‌های من</b> ({len(bots)}{limit})", ""]
     if bots:
-        lines += [f"• @{esc(b.username)} {'✅' if b.status == 'active' else '⚠️ نامعتبر'}" for b in bots]
+        lines += [f"• @{esc(b.username)} {'✅' if b.status == 'active' else '⚠️ نامعتبر'}" for b in chunk]
     else:
         lines.append("هنوز رباتی اضافه نکردی. با ربات خودت می‌تونی ری‌اکشن بدی.")
-    rows = [[Btn(f"🗑 @{b.username}", callback_data=f"b:del:{b.bot_id}")] for b in bots]
+    rows = []
+    if nav := _pager(page, pages, "b:list"):
+        rows.append(nav)
+    rows += [[Btn(f"🗑 @{b.username}", callback_data=f"b:del:{b.bot_id}:{page}")] for b in chunk]
     rows.append([Btn("➕ افزودن ربات", callback_data="b:add")])
     rows.append(back())
     return "\n".join(lines), Markup(rows)
@@ -222,16 +288,20 @@ async def bots_view(core: Core, user_id: int) -> View:
 
 def add_bot_prompt(cancel_to: str = "m:cancel:b") -> View:
     text = (
-        "توکن ربات رو از @BotFather بگیر و اینجا بفرست (می‌تونی چندتا رو با فاصله یا خط جدید بفرستی).\n\n"
-        "🔐 توکن رمزنگاری‌شده ذخیره می‌شه و پیامت همون لحظه پاک می‌شه."
+        "توکن ربات رو از @BotFather بگیر و اینجا بفرست\n"
+        "(می‌تونی چندتا رو با فاصله یا خط جدید بفرستی).\n\n"
+        "🔐 توکن رمزنگاری‌شده ذخیره می‌شه\n"
+        "و پیامت همون لحظه پاک می‌شه."
     )
     return text, Markup([back(cancel_to, "✖️ انصراف")])
 
 
-def confirm_delete_bot(bot_id: int, username: str, back_to: str = "b:list", ok_prefix: str = "b:delok") -> View:
+def confirm_delete_bot(
+    bot_id: int, username: str, back_to: str = "b:list", ok_prefix: str = "b:delok", suffix: str = ""
+) -> View:
     text = f"❓ ربات @{esc(username)} حذف بشه؟"
     return text, Markup([[
-        Btn("✅ بله", callback_data=f"{ok_prefix}:{bot_id}"),
+        Btn("✅ بله", callback_data=f"{ok_prefix}:{bot_id}{suffix}"),
         Btn("✖️ نه", callback_data=back_to),
     ]])
 
@@ -249,36 +319,87 @@ async def admin_view(core: Core) -> View:
         f"🌐 سرویس برای همه: {'✅ باز' if core.access.public else '🔒 بسته (فقط کاربران تاییدشده)'}"
     )
     rows = [
-        [Btn("🏢 ربات‌های سرویس", callback_data="a:svc:0")],
+        [
+            Btn("🏢 ربات‌های سرویس", callback_data="a:svc:0"),
+            Btn("👤 اکانت کمکی ✅" if core.helper else "👤 اکانت کمکی", callback_data="a:helper"),
+        ],
         [Btn("🔒 ببند" if core.access.public else "🌐 باز کن برای همه", callback_data="a:public")],
-        [Btn("👥 دستورات کاربران", callback_data="a:users"), Btn("🔄 بروزرسانی", callback_data="a:home")],
+        [Btn("📜 دستورات", callback_data="a:users"), Btn("🔄 بروزرسانی", callback_data="a:home")],
         back("m:home", "🔙 منوی اصلی"),
     ]
     return text, Markup(rows)
 
 
-USERS_HELP = """<b>👥 مدیریت کاربران</b>
+def helper_view(core: Core) -> View:
+    helper = core.helper
+    if helper is None:
+        text = (
+            "<b>👤 اکانت کمکی</b>\n\n"
+            "❌ تنظیم نشده.\n\n"
+            "با یک اکانت واقعی،\n"
+            "ربات‌هایی که هنوز عضو کانال/گروه نیستن هم ادمین می‌شن. "
+            "کاربر اکانت رو توی چتش\n"
+            "(با دسترسی «افزودن ادمین») ادمین می‌کنه،\n"
+            "🛡 رو می‌زنه و اکانت بعد از کار خودش خارج می‌شه."
+        )
+        rows = [[Btn("➕ افزودن اکانت", callback_data="a:helperadd")], back("a:home")]
+    else:
+        text = (
+            "<b>👤 اکانت کمکی</b>\n\n"
+            f"✅ متصل: <b>{esc(helper.label)}</b>\n"
+            f"🆔 <code>{helper.user_id}</code>\n"
+            f"👋 خروج بعد از کار: {'بله' if helper.leave_after else 'نه'}\n\n"
+            "کاربرها باید این اکانت رو توی چتشون ادمین\n"
+            "(با دسترسی «افزودن ادمین») کنن."
+        )
+        rows = [
+            [Btn("🔄 بروزرسانی وضعیت اکانت", callback_data="a:helperref")],
+            [Btn(f"👋 خروج بعد از کار: {'بله ✅' if helper.leave_after else 'نه ❌'}", callback_data="a:helperleave")],
+            [Btn("🔁 تعویض اکانت", callback_data="a:helperadd"), Btn("🗑 حذف", callback_data="a:helperdel")],
+            back("a:home"),
+        ]
+    return text, Markup(rows)
 
+
+def helper_confirm_delete() -> View:
+    text = "❓ اکانت کمکی حذف بشه؟\nنشست اون هم از تلگرام بسته (Log out) می‌شه."
+    return text, Markup([[Btn("✅ بله", callback_data="a:helperok"), Btn("✖️ نه", callback_data="a:helper")]])
+
+
+HELPER_PHONE_PROMPT = "📱 شماره‌ی اکانت رو با کد کشور بفرست، مثل <code>+98...</code>"
+
+
+def helper_prompt(text: str) -> View:
+    return text, Markup([back("a:helper", "✖️ انصراف")])
+
+
+COMMANDS_HELP = """<b>📜 دستورات</b>
+
+<b>👤 کاربران</b>
 <code>/grant ID DAYS [LIMIT]</code>
-فعال‌سازی سرویس. DAYS عدد روز یا <code>forever</code>. LIMIT = حداکثر ربات سرویس در هر چت (اختیاری).
-مثال: <code>/grant 123456 30 10</code>
+فعال‌سازی سرویس برای یه کاربر:
+• <b>ID</b>: آیدی عددی کاربر
+• <b>DAYS</b>: تعداد روز، یا <code>forever</code> برای همیشه
+• <b>LIMIT</b>: حداکثر تعداد ربات سرویس توی هر چت (اختیاری؛ نذاری محدودیتی نداره)
+
+اگه سرویسش هنوز فعاله، روزها به باقی‌مونده اضافه می‌شه.
 
 <code>/revoke ID</code> — قطع دسترسی به سرویس
 <code>/ban ID</code> · <code>/unban ID</code> — مسدود/آزاد کردن
 <code>/user ID</code> — اطلاعات کاربر
+
+<b>🏢 ربات‌های سرویس</b>
 <code>/addbot TOKEN</code> — افزودن ربات سرویس
 <code>/delbot @username</code> — حذف ربات سرویس"""
 
 
 def users_help_view() -> View:
-    return USERS_HELP, Markup([back("a:home")])
+    return COMMANDS_HELP, Markup([back("a:home")])
 
 
 async def service_bots_view(core: Core, page: int) -> View:
     bots = await core.db.list_bots(None)
-    pages = max(1, -(-len(bots) // PAGE_SIZE))
-    page = max(0, min(page, pages - 1))
-    chunk = bots[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    chunk, page, pages = _page_of(bots, page)
 
     lines = [f"<b>🏢 ربات‌های سرویس</b> ({len(bots)})", ""]
     lines += [
@@ -287,15 +408,11 @@ async def service_bots_view(core: Core, page: int) -> View:
     ] or ["هنوز رباتی اضافه نشده."]
     lines += ["", f"حداکثر ربات سرویس برای هر چت: {MAX_SERVICE_PER_CHAT}"]
 
-    nav = []
-    if page > 0:
-        nav.append(Btn("◀️", callback_data=f"a:svc:{page - 1}"))
-    nav.append(Btn(f"{page + 1}/{pages}", callback_data="noop"))
-    if page < pages - 1:
-        nav.append(Btn("▶️", callback_data=f"a:svc:{page + 1}"))
-
-    rows = [nav, [Btn("➕ افزودن ربات", callback_data="a:svcadd"), Btn("🧹 حذف نامعتبرها", callback_data="a:purge")]]
-    rows += [[Btn(f"🗑 @{b.username}", callback_data=f"a:svcdel:{b.bot_id}")] for b in chunk]
+    rows = []
+    if nav := _pager(page, pages, "a:svc"):
+        rows.append(nav)
+    rows.append([Btn("➕ افزودن ربات", callback_data="a:svcadd"), Btn("🧹 حذف نامعتبرها", callback_data="a:purge")])
+    rows += [[Btn(f"🗑 @{b.username}", callback_data=f"a:svcdel:{b.bot_id}:{page}")] for b in chunk]
     rows.append(back("a:home"))
     return "\n".join(lines), Markup(rows)
 

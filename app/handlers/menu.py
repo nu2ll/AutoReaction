@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from telegram import InlineKeyboardMarkup as Markup
 from telegram import Update
 
 from app import views
-from app.handlers.common import Context, answer, core_of, show
+from app.handlers.common import Context, answer, core_of, present, show
 
 
 async def _home(update: Update, context: Context) -> None:
@@ -11,7 +12,11 @@ async def _home(update: Update, context: Context) -> None:
     user = await core.db.touch_user(
         update.effective_user.id, update.effective_user.username, update.effective_user.full_name
     )
-    await show(update, await views.home_view(core, user))
+    view = await views.home_view(core, user)
+    if update.callback_query:
+        await show(update, view)
+    else:
+        await present(update, context, view)
 
 
 async def cmd_start(update: Update, context: Context) -> None:
@@ -19,12 +24,12 @@ async def cmd_start(update: Update, context: Context) -> None:
 
 
 async def cmd_help(update: Update, context: Context) -> None:
-    await show(update, views.help_view())
+    await present(update, context, views.help_view())
 
 
 async def cmd_cancel(update: Update, context: Context) -> None:
     context.user_data.pop("input", None)
-    await update.effective_message.reply_text("✖️ لغو شد. /menu")
+    await present(update, context, ("✖️ لغو شد.", Markup([views.back("m:home", "🔙 منوی اصلی")])))
 
 
 async def on_menu(update: Update, context: Context) -> None:

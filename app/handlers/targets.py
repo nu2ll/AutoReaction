@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from telegram import InlineKeyboardMarkup as Markup
 from telegram import Update
 
 from app import chats, views
-from app.handlers.common import Context, answer, core_of, respond, show
+from app.handlers.common import Context, answer, core_of, prompt, respond, show
 from app.access import MAX_SERVICE_PER_CHAT
 from app.models import Mode, Source, Target
 
@@ -38,8 +39,7 @@ async def on_target(update: Update, context: Context) -> None:
 
     if action == "add":
         await answer(update)
-        context.user_data["input"] = {"kind": "chat_ref"}
-        await show(update, views.add_chat_prompt())
+        await prompt(update, context, {"kind": "chat_ref"}, views.add_chat_prompt())
         return
 
     target = await _load(update, context, int(rest[0]))
@@ -73,15 +73,13 @@ async def on_target(update: Update, context: Context) -> None:
                 await core.db.update_target(target.id, mode=Mode.CUSTOM)
             else:
                 await answer(update)
-                context.user_data["input"] = {"kind": "emojis", "target": target.id}
-                await show(update, views.emoji_prompt(target))
+                await prompt(update, context, {"kind": "emojis", "target": target.id}, views.emoji_prompt(target))
                 return
             await answer(update)
 
         case "emo":
             await answer(update)
-            context.user_data["input"] = {"kind": "emojis", "target": target.id}
-            await show(update, views.emoji_prompt(target))
+            await prompt(update, context, {"kind": "emojis", "target": target.id}, views.emoji_prompt(target))
             return
 
         case "ch":
@@ -95,17 +93,17 @@ async def on_target(update: Update, context: Context) -> None:
             await answer(update)
 
         case "prov":
-            await answer(update, "⏳ در حال ادمین‌کردن ربات‌ها…")
-            report = await chats.provision(core, target)
-            await query.message.reply_text(report.render())
-            await _show_target(update, context, target.id)
+            await answer(update)
+            await respond(update, "⏳ در حال ادمین‌کردن ربات‌ها…")
+            report = await chats.provision(core, target, always_helper=True)
+            await show(update, (report.render(), Markup([views.back(f"t:open:{target.id}")])))
             return
 
         case "chk":
-            await answer(update, "⏳ در حال بررسی…")
+            await answer(update)
+            await respond(update, "⏳ در حال بررسی…")
             text = await chats.check_target(core, target)
-            await query.message.reply_text(text)
-            await _show_target(update, context, target.id)
+            await show(update, (text, Markup([views.back(f"t:open:{target.id}")])))
             return
 
         case "del":
@@ -117,7 +115,6 @@ async def on_target(update: Update, context: Context) -> None:
             assigned = await core.db.assigned_bot_ids(target.id)
             service_ids = [b for b in assigned if core.pool.has_owner(b) and core.pool.owner_of(b) is None]
             await core.db.delete_target(target.id)
-            core.cache.drop(target.chat_id)
             if service_ids:
                 core.spawn(chats.release_bots(core, target.chat_id, service_ids))
             await answer(update, "🗑 حذف شد.")
